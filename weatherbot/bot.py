@@ -52,11 +52,11 @@ class SubscriptionDB:
             cur = conn.execute("SELECT chat_id, location, date, forecast FROM subscriptions")
             return cur.fetchall()
 
-    def get_chat_subscriptions(self, chat_id: int) -> List[Tuple[str, str, str]]:
-        """Return subscriptions for a specific chat."""
+    def get_chat_subscriptions(self, chat_id: int) -> List[Tuple[int, str, str, str]]:
+        """Return subscriptions for a specific chat including rowid."""
         with sqlite3.connect(self.path) as conn:
             cur = conn.execute(
-                "SELECT location, date, forecast FROM subscriptions WHERE chat_id=?",
+                "SELECT rowid, location, date, forecast FROM subscriptions WHERE chat_id=?",
                 (chat_id,),
             )
             return cur.fetchall()
@@ -67,6 +67,22 @@ class SubscriptionDB:
                 "DELETE FROM subscriptions WHERE chat_id=? AND location=? AND date=?",
                 (chat_id, location, date),
             )
+
+    def remove_subscription_by_id(self, rowid: int) -> None:
+        """Remove a subscription using its rowid."""
+        with sqlite3.connect(self.path) as conn:
+            conn.execute("DELETE FROM subscriptions WHERE rowid=?", (rowid,))
+
+    def get_subscription_by_id(
+        self, rowid: int
+    ) -> Tuple[int, str, str, str] | None:
+        """Return single subscription by rowid."""
+        with sqlite3.connect(self.path) as conn:
+            cur = conn.execute(
+                "SELECT chat_id, location, date, forecast FROM subscriptions WHERE rowid=?",
+                (rowid,),
+            )
+            return cur.fetchone()
 
     def update_forecast(self, chat_id: int, location: str, date: str, forecast: str) -> None:
         with sqlite3.connect(self.path) as conn:
@@ -167,10 +183,10 @@ class WeatherBot:
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        f"{loc} - {date}", callback_data=f"show|{loc}|{date}"
+                        f"{loc} - {date}", callback_data=f"show|{rowid}"
                     )
                 ]
-                for loc, date, _ in subs
+                for rowid, loc, date, _ in subs
             ]
             await query.message.reply_text(
                 "Выберите подписку:", reply_markup=InlineKeyboardMarkup(keyboard)
@@ -183,23 +199,35 @@ class WeatherBot:
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        f"{loc} - {date}", callback_data=f"del|{loc}|{date}"
+                        f"{loc} - {date}", callback_data=f"del|{rowid}"
                     )
                 ]
-                for loc, date, _ in subs
+                for rowid, loc, date, _ in subs
             ]
             await query.message.reply_text(
                 "Выберите подписку для удаления:",
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
         elif data.startswith("del|"):
-            _, loc, date = data.split("|", 2)
-            self.db.remove_subscription(query.message.chat_id, loc, date)
+            _, rowid_text = data.split("|", 1)
+            rowid = int(rowid_text)
+            sub = self.db.get_subscription_by_id(rowid)
+            if not sub:
+                await query.message.reply_text("Не удалось найти подписку.")
+                return
+            _, loc, date, _ = sub
+            self.db.remove_subscription_by_id(rowid)
             await query.message.reply_text(
                 f"Подписка {loc} на {date} удалена."
             )
         elif data.startswith("show|"):
-            _, loc, date = data.split("|", 2)
+            _, rowid_text = data.split("|", 1)
+            rowid = int(rowid_text)
+            sub = self.db.get_subscription_by_id(rowid)
+            if not sub:
+                await query.message.reply_text("Не удалось найти подписку.")
+                return
+            _, loc, date, _ = sub
             forecast = self._get_weather_text(loc)
             await query.message.reply_text(
                 f"Погода в {loc} на {date}:\n{forecast}"
