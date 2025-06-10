@@ -108,7 +108,15 @@ class WeatherBot:
             await update.message.reply_text("Неверный формат даты. Попробуйте ещё раз.")
             return SELECTING_DATE
 
-        forecast = self._get_weather_text(location)
+        try:
+            forecast = self._get_weather_text(location)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("Failed to get weather: %s", exc)
+            await update.message.reply_text(
+                "Не удалось получить прогноз. Попробуйте позже."
+            )
+            return ConversationHandler.END
+
         self.db.add_subscription(update.effective_chat.id, location, date_text, forecast)
         await update.message.reply_text(
             f"Подписка добавлена. Погода в {location} на {date_text}:\n{forecast}"
