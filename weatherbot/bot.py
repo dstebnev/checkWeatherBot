@@ -228,7 +228,12 @@ class WeatherBot:
                 await query.message.reply_text("Не удалось найти подписку.")
                 return
             _, loc, date, _ = sub
-            forecast = self._get_weather_text(loc)
+            try:
+                date_obj = datetime.strptime(date, "%Y-%m-%d").date()
+            except ValueError:
+                await query.message.reply_text("Некорректная дата подписки.")
+                return
+            forecast = self._get_weather_text(loc, date_obj)
             await query.message.reply_text(
                 f"Погода в {loc} на {date}:\n{forecast}"
             )
