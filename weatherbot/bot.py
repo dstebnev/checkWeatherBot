@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from typing import Tuple, List
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -137,10 +137,10 @@ class WeatherBot:
             await update.message.reply_text("Неверный формат даты. Попробуйте ещё раз.")
             return SELECTING_DATE
 
-        forecast = self._get_weather_text(location)
+        forecast = self._get_weather_text(location, date)
         self.db.add_subscription(update.effective_chat.id, location, date_text, forecast)
         await update.message.reply_text(
-            f"Подписка добавлена. Погода в {location} на {date_text}:\n{forecast}"
+            f"Подписка добавлена. Ближайший прогноз погоды в {location} на {date_text}:\n{forecast}"
         )
 
         await self.menu(update, context)
@@ -199,18 +199,27 @@ class WeatherBot:
                 f"Подписка {loc} на {date} удалена."
             )
         elif data.startswith("show|"):
-            _, loc, date = data.split("|", 2)
-            forecast = self._get_weather_text(loc)
+            _, loc, date_str = data.split("|", 2)
+            try:
+                date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                await query.message.reply_text("Неверный формат даты")
+                return
+            forecast = self._get_weather_text(loc, date_obj)
             await query.message.reply_text(
-                f"Погода в {loc} на {date}:\n{forecast}"
+                f"Ближайший прогноз погоды в {loc} на {date_str}:\n{forecast}"
             )
         # No action needed for 'add' here, handled by ConversationHandler
 
-    def _get_weather_text(self, location: str) -> str:
+    def _get_weather_text(self, location: str, target_date: date) -> str:
         data = self.weather_service.get_forecast(location)
-        if "list" not in data:
+        if "list" not in data or not data["list"]:
             return "Не удалось получить прогноз."
-        item = data["list"][0]
+        target_dt = datetime.combine(target_date, datetime.min.time()) + timedelta(hours=12)
+        item = min(
+            data["list"],
+            key=lambda i: abs(datetime.fromtimestamp(i["dt"]) - target_dt),
+        )
         description = item["weather"][0]["description"]
         temp = item["main"]["temp"]
         pop = item.get("pop", 0)
@@ -230,7 +239,12 @@ class WeatherBot:
         LOGGER.info("Checking weather updates...")
         for chat_id, location, date, old_forecast in self.db.get_subscriptions():
             try:
-                new_forecast = self._get_weather_text(location)
+                date_obj = datetime.strptime(date, "%Y-%m-%d").date()
+            except ValueError:
+                LOGGER.error("Invalid date stored: %s", date)
+                continue
+            try:
+                new_forecast = self._get_weather_text(location, date_obj)
             except Exception as exc:  # noqa: BLE001
                 LOGGER.error("Error getting weather: %s", exc)
                 continue
