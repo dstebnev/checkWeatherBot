@@ -164,8 +164,17 @@ class WeatherBot:
             if not subs:
                 await query.message.reply_text("У вас нет активных подписок.")
                 return
-            text = "\n".join(f"{loc} - {date}" for loc, date, _ in subs)
-            await query.message.reply_text(f"Ваши подписки:\n{text}")
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        f"{loc} - {date}", callback_data=f"show|{loc}|{date}"
+                    )
+                ]
+                for loc, date, _ in subs
+            ]
+            await query.message.reply_text(
+                "Выберите подписку:", reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         elif data == "delete":
             subs = self.db.get_chat_subscriptions(query.message.chat_id)
             if not subs:
@@ -188,6 +197,12 @@ class WeatherBot:
             self.db.remove_subscription(query.message.chat_id, loc, date)
             await query.message.reply_text(
                 f"Подписка {loc} на {date} удалена."
+            )
+        elif data.startswith("show|"):
+            _, loc, date = data.split("|", 2)
+            forecast = self._get_weather_text(loc)
+            await query.message.reply_text(
+                f"Погода в {loc} на {date}:\n{forecast}"
             )
         # No action needed for 'add' here, handled by ConversationHandler
 
