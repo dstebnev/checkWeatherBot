@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, date
 from typing import Tuple, List
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (Application, CallbackContext, CallbackQueryHandler,
                           CommandHandler, ConversationHandler, MessageHandler,
@@ -161,11 +161,11 @@ class WeatherBot:
 
         await self.menu(update, context)
 
-        # Schedule first check a bit later
+        # Schedule periodic updates
         self.scheduler.add_job(
             self.check_updates,
-            trigger=DateTrigger(run_date=datetime.utcnow()),
-            id="check_updates",
+            trigger=IntervalTrigger(hours=3),
+            id="periodic_updates",
             replace_existing=True,
         )
         return ConversationHandler.END
