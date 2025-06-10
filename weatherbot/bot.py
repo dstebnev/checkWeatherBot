@@ -213,7 +213,18 @@ class WeatherBot:
         item = data["list"][0]
         description = item["weather"][0]["description"]
         temp = item["main"]["temp"]
-        return f"{description}, {temp}°C"
+        pop = item.get("pop", 0)
+
+        if pop < 0.2:
+            rain_text = "дождь маловероятен"
+        elif pop < 0.5:
+            rain_text = "возможен дождь"
+        elif pop < 0.8:
+            rain_text = "вероятен дождь"
+        else:
+            rain_text = "очень вероятен дождь"
+
+        return f"{description}, {temp}°C. {rain_text}"
 
     async def check_updates(self) -> None:
         LOGGER.info("Checking weather updates...")
