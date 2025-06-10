@@ -4,7 +4,8 @@ import asyncio
 import logging
 import os
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
+import calendar
 from typing import Dict, Tuple
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -73,13 +74,42 @@ class WeatherBot:
             entry_points=[CommandHandler("start", self.start)],
             states={
                 SELECTING_LOCATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.location_selected)],
-                SELECTING_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.date_selected)],
+                SELECTING_DATE: [
+                    CallbackQueryHandler(self.calendar_handler, pattern="^CAL_"),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, self.date_selected),
+                ],
             },
             fallbacks=[CommandHandler("cancel", self.cancel)],
         )
         self.app.add_handler(conv_handler)
         self.app.add_handler(CommandHandler("help", self.help))
-        self.app.add_handler(CallbackQueryHandler(self.button))
+
+    def _build_calendar(self, year: int, month: int) -> InlineKeyboardMarkup:
+        keyboard = []
+        keyboard.append(
+            [
+                InlineKeyboardButton("<", callback_data=f"CAL_PREV_{year}_{month}"),
+                InlineKeyboardButton(
+                    f"{calendar.month_name[month]} {year}", callback_data="CAL_IGNORE"
+                ),
+                InlineKeyboardButton(">", callback_data=f"CAL_NEXT_{year}_{month}")
+            ]
+        )
+        week_days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        keyboard.append([InlineKeyboardButton(d, callback_data="CAL_IGNORE") for d in week_days])
+        for week in calendar.monthcalendar(year, month):
+            row = []
+            for day in week:
+                if day == 0:
+                    row.append(InlineKeyboardButton(" ", callback_data="CAL_IGNORE"))
+                else:
+                    row.append(
+                        InlineKeyboardButton(
+                            str(day), callback_data=f"CAL_DAY_{year}_{month}_{day}"
+                        )
+                    )
+            keyboard.append(row)
+        return InlineKeyboardMarkup(keyboard)
 
     async def start(self, update: Update, context: CallbackContext) -> int:
         await update.message.reply_text("Введите интересующий вас город:")
@@ -96,21 +126,62 @@ class WeatherBot:
 
     async def location_selected(self, update: Update, context: CallbackContext) -> int:
         context.user_data["location"] = update.message.text
-        await update.message.reply_text("Введите дату в формате ГГГГ-ММ-ДД:")
+        today = date.today()
+        markup = self._build_calendar(today.year, today.month)
+        await update.message.reply_text("Выберите дату:", reply_markup=markup)
         return SELECTING_DATE
 
     async def date_selected(self, update: Update, context: CallbackContext) -> int:
         date_text = update.message.text
+        return await self._finalize_subscription(update, context, date_text)
+
+    async def calendar_handler(self, update: Update, context: CallbackContext) -> int:
+        query = update.callback_query
+        await query.answer()
+        data = query.data
+        if data == "CAL_IGNORE":
+            return SELECTING_DATE
+        if data.startswith("CAL_DAY_"):
+            _, year, month, day = data.split("_")
+            date_text = f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+            await query.edit_message_reply_markup(reply_markup=None)
+            return await self._finalize_subscription(update, context, date_text)
+        _, action, year, month = data.split("_")
+        year = int(year)
+        month = int(month)
+        if action == "PREV":
+            month -= 1
+            if month < 1:
+                month = 12
+                year -= 1
+        else:
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+        markup = self._build_calendar(year, month)
+        await query.edit_message_reply_markup(reply_markup=markup)
+        return SELECTING_DATE
+
+    async def _finalize_subscription(self, update: Update, context: CallbackContext, date_text: str) -> int:
         location = context.user_data["location"]
         try:
-            date = datetime.strptime(date_text, "%Y-%m-%d").date()
+            datetime.strptime(date_text, "%Y-%m-%d").date()
         except ValueError:
-            await update.message.reply_text("Неверный формат даты. Попробуйте ещё раз.")
+            await update.effective_message.reply_text("Неверный формат даты. Попробуйте ещё раз.")
             return SELECTING_DATE
 
-        forecast = self._get_weather_text(location)
+        try:
+            forecast = self._get_weather_text(location)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("Failed to get weather: %s", exc)
+            await update.effective_message.reply_text(
+                "Не удалось получить прогноз. Попробуйте позже."
+            )
+            return ConversationHandler.END
+
         self.db.add_subscription(update.effective_chat.id, location, date_text, forecast)
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"Подписка добавлена. Погода в {location} на {date_text}:\n{forecast}"
         )
 
@@ -122,10 +193,6 @@ class WeatherBot:
             replace_existing=True,
         )
         return ConversationHandler.END
-
-    async def button(self, update: Update, context: CallbackContext) -> None:
-        query = update.callback_query
-        await query.answer()
 
     def _get_weather_text(self, location: str) -> str:
         data = self.weather_service.get_forecast(location)
