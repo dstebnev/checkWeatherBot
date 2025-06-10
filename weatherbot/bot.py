@@ -14,7 +14,7 @@ from telegram.ext import (Application, CallbackContext, CallbackQueryHandler,
                           CommandHandler, ConversationHandler, MessageHandler,
                           filters)
 
-from .weather import WeatherService
+from weather import WeatherService
 
 
 logging.basicConfig(level=logging.INFO)

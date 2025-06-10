@@ -1,15 +1,15 @@
 import os
 import requests
-
+from typing import Optional
 
 class WeatherService:
     """Service to fetch weather data from OpenWeatherMap."""
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("WEATHER_API_KEY")
         if not self.api_key:
             raise ValueError("WEATHER_API_KEY is not set")
-
+    
     def get_forecast(self, location: str) -> dict:
         """Return weather forecast for the given location."""
         url = "https://api.openweathermap.org/data/2.5/forecast"
