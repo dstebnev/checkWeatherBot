@@ -288,6 +288,13 @@ class WeatherBot:
 
     def run(self) -> None:
         self.scheduler.start()
+        # Schedule periodic updates and replace existing job if any
+        self.scheduler.add_job(
+            self.check_updates,
+            trigger=IntervalTrigger(hours=3),
+            id="periodic_updates",
+            replace_existing=True,
+        )
         LOGGER.info("Bot started")
         self.app.run_polling()
 
